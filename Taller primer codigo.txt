@@ -1,0 +1,109 @@
+#include <Adafruit_NeoPixel.h>
+
+const int PIN_NEOPIXEL     = 6;
+const int PIN_PING         = 7;
+const int PIN_MOTOR_IN1    = 9;
+const int PIN_MOTOR_IN2    = 10;
+const int NUM_LEDS         = 36; 
+
+Adafruit_NeoPixel cadenaAnillos(NUM_LEDS, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
+
+// Variables globales para la transición suave (Fading)
+float colorActualR = 100, colorActualG = 0, colorActualB = 255; // Inicia en Violeta/Azul
+float velocidadTransicion = 0.50; 
+
+void setup() {
+  pinMode(PIN_MOTOR_IN1, OUTPUT);
+  pinMode(PIN_MOTOR_IN2, OUTPUT);
+  
+  cadenaAnillos.begin();
+  cadenaAnillos.show(); 
+  
+  Serial.begin(9600); 
+}
+
+void loop() {
+  long duracion, cm;
+  
+  // Lectura del sensor PING)))
+  pinMode(PIN_PING, OUTPUT);
+  digitalWrite(PIN_PING, LOW);
+  delayMicroseconds(2);
+  digitalWrite(PIN_PING, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(PIN_PING, LOW);
+
+  pinMode(PIN_PING, INPUT);
+  duracion = pulseIn(PIN_PING, HIGH);
+  cm = duracion / 29 / 2;
+
+  // Variables para el color OBJETIVO
+  int targetR = 100;
+  int targetG = 0;
+  int targetB = 255;
+
+  // --- LÓGICA DE INTERACCIÓN MAPEADA (DE FRÍO A CÁLIDO CONTINUO) ---
+  
+  // 1. ESTADO REPOSO ABSOLUTO: Sin interactuar o muy lejos
+  if (cm > 250 || cm == 0) { 
+    // Oscila suavemente entre azul y violeta en reposo
+    float oscilacion = (sin(millis() / 500.0) + 1.0) / 2.0;
+    targetR = 40 + (oscilacion * 80); // Entre 40 y 120 de Rojo
+    targetG = 0;
+    targetB = 255;                    // Azul a tope
+    
+    controlarMotor(true, 60);         // Rotación constante lenta de espera
+  } 
+  
+  // 2. MANO LEJOS: Transición de Azul/Violeta yendo a Rojo (Entre 50 cm y 250 cm)
+  else if (cm >= 150 && cm <= 250) {
+    // A menor distancia, más Rojo (targetR) y menos Azul (targetB)
+    targetR = map(cm, 50, 250, 255, 40);  // Cerca de 50 es 255 (Rojo), cerca de 250 es 40
+    targetG = 0;
+    targetB = map(cm, 50, 250, 0, 255);  // Cerca de 50 es 0 (Sin azul), cerca de 250 es 255
+    
+    // El motor va aumentando la velocidad inversa a medida que te acercas
+    int velocidadMotor = map(cm, 50, 250, 160, 90);
+    controlarMotor(false, velocidadMotor); 
+  } 
+  
+  // 3. MANO CERCA: Transición de Rojo yendo a Naranja intenso (A menos de 50 cm)
+  else if (cm < 150 && cm > 0) {
+    // Al acercarte al mínimo, sube el Verde para transformar el Rojo en Naranja
+    targetR = 255;
+    targetG = map(cm, 3, 50, 140, 30);   // A menor distancia, más verde (más naranja)
+    targetB = 0;
+    
+    // Motor a velocidades altas de reacción
+    int velocidadMotor = map(cm, 3, 50, 255, 165);
+    controlarMotor(false, velocidadMotor); 
+  }
+
+  // --- INTERPOLACIÓN PARA EL FADE ORGÁNICO ---
+  colorActualR += (targetR - colorActualR) * velocidadTransicion;
+  colorActualG += (targetG - colorActualG) * velocidadTransicion;
+  colorActualB += (targetB - colorActualB) * velocidadTransicion;
+
+  aplicarColorCadena((byte)colorActualR, (byte)colorActualG, (byte)colorActualB);
+
+  delay(30); 
+}
+
+// --- FUNCIONES AUXILIARES ---
+
+void aplicarColorCadena(byte r, byte g, byte b) {
+  for (int i = 0; i < NUM_LEDS; i++) {
+    cadenaAnillos.setPixelColor(i, cadenaAnillos.Color(r, g, b));
+  }
+  cadenaAnillos.show();
+}
+
+void controlarMotor(boolean sentidoHorario, int velocidad) {
+  if (sentidoHorario) {
+    analogWrite(PIN_MOTOR_IN1, velocidad);
+    digitalWrite(PIN_MOTOR_IN2, LOW);
+  } else {
+    digitalWrite(PIN_MOTOR_IN1, LOW);
+    analogWrite(PIN_MOTOR_IN2, velocidad);
+  }
+}
